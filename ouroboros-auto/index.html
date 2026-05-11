@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>How `ooo auto` Works in Ouroboros</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2a3340;
+    --ink: #e6edf3;
+    --ink-dim: #9aa6b2;
+    --accent: #7ee787;
+    --accent-2: #79c0ff;
+    --warn: #f7b955;
+    --danger: #ff7b72;
+    --code-bg: #0b0f14;
+  }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; margin: 36px 0 12px; color: var(--accent-2); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  h3 { font-size: 15px; margin: 18px 0 6px; color: var(--accent); }
+  p { margin: 10px 0; }
+  .lede { color: var(--ink-dim); font-size: 15px; margin-bottom: 8px; }
+  code, pre { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  pre .file { color: var(--ink-dim); font-size: 11px; display: block; margin-bottom: 8px; }
+  pre .kw { color: #ff7b72; }
+  pre .fn { color: #d2a8ff; }
+  pre .str { color: #a5d6ff; }
+  pre .com { color: #6e7681; font-style: italic; }
+  pre .ty { color: #ffa657; }
+  .callout {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin: 10px 0;
+    font-size: 14px;
+  }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.danger { border-left-color: var(--danger); }
+  .annotation { color: var(--ink-dim); font-size: 13px; margin: 6px 0 14px; padding-left: 10px; border-left: 2px solid var(--border); }
+  .diagram {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 16px 0 24px;
+    overflow-x: auto;
+  }
+  .diagram svg { display: block; margin: 0 auto; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); margin-top: 12px; justify-content: center; }
+  .legend .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .card h3 { margin-top: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 13px; }
+  th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel-2); color: var(--ink-dim); font-weight: 600; }
+  .breadcrumb { color: var(--ink-dim); font-size: 13px; margin-bottom: 16px; }
+  .breadcrumb a { color: var(--accent-2); text-decoration: none; }
+  .breadcrumb a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="breadcrumb"><a href="/">jaeyunha</a> &rsaquo; ouroboros <code>ooo auto</code></div>
+
+<h1>How <code>ooo auto</code> Works in Ouroboros</h1>
+<p class="lede">A <strong>bounded state machine</strong> that takes a fuzzy goal and walks it through 7 phases — Socratic interview → A-grade Seed spec → execution handoff → optional Ralph QA loop — with a hard top-level deadline, persistent resume across process restarts, and a deterministic anti-self-rationalization gate.</p>
+
+<div class="callout">
+<strong>Mental model in one sentence:</strong> if Codex's <code>/goal</code> is "keep poking the model until it says done," <code>ooo auto</code> is "drive a fuzzy idea through a typed pipeline of phases, each with its own timeout, where the model can never short-circuit a phase by claiming completeness."
+</div>
+
+<h2>1. Flow Diagram</h2>
+<div class="diagram">
+<svg viewBox="0 0 920 580" width="100%" style="max-width:920px;">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#79c0ff"/>
+    </marker>
+    <marker id="arrow-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7ee787"/>
+    </marker>
+    <marker id="arrow-warn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f7b955"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #1c2330; stroke: #2a3340; stroke-width: 1.2; rx: 8; }
+    .box-start { fill: #1a2433; stroke: #305275; }
+    .box-interview { fill: #2a2030; stroke: #6b3d6b; }
+    .box-seed { fill: #1f2a1f; stroke: #3d6b3d; }
+    .box-review { fill: #2a2820; stroke: #6b5d2a; }
+    .box-run { fill: #2a1f1f; stroke: #6b3d3d; }
+    .box-terminal { fill: #1a1a22; stroke: #4a4a55; }
+    .lbl { fill: #e6edf3; font: 13px -apple-system, sans-serif; }
+    .lbl-sm { fill: #9aa6b2; font: 11px -apple-system, sans-serif; }
+    .lbl-code { fill: #a5d6ff; font: 11px "SF Mono", monospace; }
+    .lbl-warn { fill: #f7b955; font: 11px -apple-system, sans-serif; font-style: italic; }
+    .edge { stroke: #79c0ff; stroke-width: 1.6; fill: none; }
+    .edge-loop { stroke: #7ee787; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+    .edge-warn { stroke: #f7b955; stroke-width: 1.6; fill: none; }
+  </style>
+
+  <!-- top: deadline -->
+  <rect class="box" x="280" y="20" width="360" height="36" style="stroke:#f7b955;"/>
+  <text class="lbl-warn" x="460" y="43" text-anchor="middle">2-hour pipeline deadline armed at first transition (Q00/#779)</text>
+
+  <!-- CREATED -->
+  <rect class="box box-start" x="20" y="90" width="160" height="56"/>
+  <text class="lbl" x="100" y="112" text-anchor="middle">CREATED</text>
+  <text class="lbl-sm" x="100" y="130" text-anchor="middle">ooo auto "build X"</text>
+
+  <!-- INTERVIEW -->
+  <rect class="box box-interview" x="220" y="90" width="180" height="80"/>
+  <text class="lbl" x="310" y="112" text-anchor="middle">INTERVIEW</text>
+  <text class="lbl-sm" x="310" y="130" text-anchor="middle">Socratic questions until</text>
+  <text class="lbl-sm" x="310" y="146" text-anchor="middle">ledger.is_seed_ready()</text>
+  <text class="lbl-sm" x="310" y="162" text-anchor="middle">120s × N rounds</text>
+
+  <!-- SEED_GENERATION -->
+  <rect class="box box-seed" x="440" y="90" width="180" height="80"/>
+  <text class="lbl" x="530" y="112" text-anchor="middle">SEED_GENERATION</text>
+  <text class="lbl-sm" x="530" y="130" text-anchor="middle">crystallize spec from</text>
+  <text class="lbl-sm" x="530" y="146" text-anchor="middle">interview + ledger</text>
+  <text class="lbl-sm" x="530" y="162" text-anchor="middle">+ ambiguity floor</text>
+
+  <!-- REVIEW + REPAIR -->
+  <rect class="box box-review" x="660" y="90" width="240" height="80"/>
+  <text class="lbl" x="780" y="112" text-anchor="middle">REVIEW ⇄ REPAIR</text>
+  <text class="lbl-sm" x="780" y="130" text-anchor="middle">SeedRepairer.converge() loops</text>
+  <text class="lbl-sm" x="780" y="146" text-anchor="middle">until grade ≥ A or budget</text>
+  <text class="lbl-sm" x="780" y="162" text-anchor="middle">90s × bounded iterations</text>
+
+  <!-- RUN -->
+  <rect class="box box-run" x="660" y="230" width="240" height="80"/>
+  <text class="lbl" x="780" y="252" text-anchor="middle">RUN (handoff)</text>
+  <text class="lbl-sm" x="780" y="270" text-anchor="middle">StartExecuteSeedHandler →</text>
+  <text class="lbl-sm" x="780" y="286" text-anchor="middle">runtime backend dispatches</text>
+  <text class="lbl-sm" x="780" y="302" text-anchor="middle">execution job</text>
+
+  <!-- RALPH_HANDOFF (conditional) -->
+  <rect class="box box-run" x="660" y="350" width="240" height="80" style="stroke-dasharray: 4 3;"/>
+  <text class="lbl" x="780" y="372" text-anchor="middle">RALPH_HANDOFF</text>
+  <text class="lbl-warn" x="780" y="390" text-anchor="middle">--complete-product only</text>
+  <text class="lbl-sm" x="780" y="406" text-anchor="middle">poll until QA passes,</text>
+  <text class="lbl-sm" x="780" y="422" text-anchor="middle">convergence, or deadline</text>
+
+  <!-- Terminal states -->
+  <rect class="box box-terminal" x="20" y="350" width="180" height="56"/>
+  <text class="lbl" x="110" y="372" text-anchor="middle">COMPLETE</text>
+  <text class="lbl-sm" x="110" y="390" text-anchor="middle">happy path exit</text>
+
+  <rect class="box box-terminal" x="20" y="430" width="180" height="56" style="stroke:#f7b955;"/>
+  <text class="lbl" x="110" y="452" text-anchor="middle" fill="#f7b955">BLOCKED</text>
+  <text class="lbl-sm" x="110" y="470" text-anchor="middle">grade gate, deadline,</text>
+  <text class="lbl-sm" x="110" y="486" text-anchor="middle">unresolved gaps → resumable</text>
+
+  <rect class="box box-terminal" x="220" y="430" width="180" height="56" style="stroke:#ff7b72;"/>
+  <text class="lbl" x="310" y="452" text-anchor="middle" fill="#ff7b72">FAILED</text>
+  <text class="lbl-sm" x="310" y="470" text-anchor="middle">non-recoverable error</text>
+
+  <!-- arrows top row -->
+  <path class="edge" d="M 180 118 L 220 118" marker-end="url(#arrow)"/>
+  <path class="edge" d="M 400 130 L 440 130" marker-end="url(#arrow)"/>
+  <path class="edge" d="M 620 130 L 660 130" marker-end="url(#arrow)"/>
+
+  <!-- REPAIR loop arrow -->
+  <path class="edge-loop" d="M 870 100 C 910 80, 910 180, 870 160" marker-end="url(#arrow-loop)"/>
+  <text class="lbl-sm" x="905" y="135" fill="#7ee787">repair</text>
+
+  <!-- REVIEW → RUN -->
+  <path class="edge" d="M 780 170 L 780 230" marker-end="url(#arrow)"/>
+  <text class="lbl-code" x="800" y="205">A-grade</text>
+
+  <!-- RUN → RALPH (conditional) -->
+  <path class="edge-warn" d="M 780 310 L 780 350" marker-end="url(#arrow-warn)"/>
+  <text class="lbl-warn" x="650" y="335" text-anchor="end">if --complete-product</text>
+
+  <!-- RUN → COMPLETE (default) -->
+  <path class="edge" d="M 660 290 C 400 290, 400 378, 200 378" marker-end="url(#arrow)"/>
+  <text class="lbl-code" x="430" y="284">handoff started</text>
+
+  <!-- RALPH → COMPLETE -->
+  <path class="edge" d="M 660 410 C 400 410, 250 410, 200 388" marker-end="url(#arrow)"/>
+
+  <!-- BLOCKED branch from anywhere -->
+  <path class="edge-warn" d="M 660 150 C 400 150, 200 250, 110 350" stroke-dasharray="5 4" marker-end="url(#arrow-warn)"/>
+  <text class="lbl-warn" x="240" y="245">grade &lt; A / timeout / gap</text>
+
+  <!-- Resume arrow -->
+  <path class="edge-loop" d="M 200 460 C 400 530, 600 540, 870 480" marker-end="url(#arrow-loop)"/>
+  <text class="lbl-sm" x="540" y="540" text-anchor="middle" fill="#7ee787">BLOCKED is resumable: state.recover() picks recoverable phase from last_tool_name</text>
+
+</svg>
+<div class="legend">
+  <span><span class="swatch" style="background:#79c0ff"></span>happy path</span>
+  <span><span class="swatch" style="background:#7ee787"></span>loop / resume</span>
+  <span><span class="swatch" style="background:#f7b955"></span>conditional / blocked</span>
+</div>
+</div>
+
+<h2>2. Key Code Snippets</h2>
+
+<h3>① The phase enum — closed set, no improvisation</h3>
+<p class="annotation">Every state the pipeline can be in is enumerated here. There are exactly 10 — three of them terminal. This closed set is what makes resume safe: a session in any state can be re-loaded and either continued or marked terminal.</p>
+<pre><span class="file">src/ouroboros/auto/state.py:15</span><span class="kw">class</span> <span class="ty">AutoPhase</span>(<span class="ty">StrEnum</span>):
+    <span class="com">"""Closed set of phases for auto-mode resume and stall handling."""</span>
+    CREATED         = <span class="str">"created"</span>
+    INTERVIEW       = <span class="str">"interview"</span>
+    SEED_GENERATION = <span class="str">"seed_generation"</span>
+    REVIEW          = <span class="str">"review"</span>
+    REPAIR          = <span class="str">"repair"</span>
+    RUN             = <span class="str">"run"</span>
+    RALPH_HANDOFF   = <span class="str">"ralph_handoff"</span>
+    COMPLETE        = <span class="str">"complete"</span>
+    BLOCKED         = <span class="str">"blocked"</span>
+    FAILED          = <span class="str">"failed"</span>
+
+DEFAULT_TIMEOUT_SECONDS_BY_PHASE: dict[str, int] = {
+    AutoPhase.INTERVIEW.value:       120,    <span class="com"># per-round, not total</span>
+    AutoPhase.SEED_GENERATION.value: 120,
+    AutoPhase.REVIEW.value:           90,
+    AutoPhase.REPAIR.value:           90,
+    AutoPhase.RUN.value:              60,
+}
+
+DEFAULT_PIPELINE_TIMEOUT_SECONDS: float = 7200.0  <span class="com"># top-level 2h cap</span></pre>
+<div class="callout"><strong>Why it matters:</strong> a phase enum + per-phase timeout + top-level deadline is the entire safety story. The model never gets to invent a new state, can't stall a phase past its budget, and can't hold the whole pipeline past 2h. Compare this to <code>/goal</code>'s loose "keep going until the model says done."</div>
+
+<h3>② The pipeline driver — phase machine, not an event loop</h3>
+<p class="annotation">The 1500-line <code>AutoPipeline.run()</code> is one big sequential phase walk. Each phase is wrapped in <code>asyncio.wait_for</code> with a deadline-capped timeout. Failure inside a phase does not throw — it transitions to BLOCKED with a tool-name attribution.</p>
+<pre><span class="file">src/ouroboros/auto/pipeline.py:179 (condensed)</span><span class="kw">async def</span> run(<span class="kw">self</span>, state: AutoPipelineState) -&gt; AutoPipelineResult:
+    <span class="com"># Top-level deadline check on resume — if 2h already elapsed, fail fast.</span>
+    <span class="kw">if</span> state.is_deadline_expired():
+        state.mark_blocked(_RESUME_EXPIRED_MESSAGE, tool_name=PIPELINE_DEADLINE_TOOL_NAME)
+        <span class="kw">return</span> <span class="kw">self</span>._result(state, ledger, blocker=state.last_error)
+
+    <span class="com"># INTERVIEW phase, bounded by remaining deadline + per-phase timeout</span>
+    <span class="kw">if</span> state.phase <span class="kw">in</span> {AutoPhase.CREATED, AutoPhase.INTERVIEW}:
+        interview_timeout = <span class="kw">self</span>._deadline_capped_timeout(state, INTERVIEW_TIMEOUT)
+        <span class="kw">try</span>:
+            interview = <span class="kw">await</span> asyncio.wait_for(
+                <span class="kw">self</span>.interview_driver.run(state, ledger),
+                timeout=interview_timeout,
+            )
+        <span class="kw">except</span> TimeoutError:
+            state.mark_blocked(<span class="str">f"interview phase exceeded {INTERVIEW_TIMEOUT:.0f}s"</span>, ...)
+            <span class="kw">return</span> <span class="kw">self</span>._result(state, ledger, blocker=state.last_error)
+        state.transition(AutoPhase.SEED_GENERATION, <span class="str">"generating Seed from auto interview"</span>)
+
+    <span class="com"># SEED_GENERATION → REVIEW (with deterministic ambiguity floor)</span>
+    <span class="kw">if</span> state.phase == AutoPhase.SEED_GENERATION:
+        seed = <span class="kw">await</span> asyncio.wait_for(<span class="kw">self</span>.seed_generator(state.interview_session_id), ...)
+        floor = deterministic_floor(ledger)        <span class="com"># anti-rationalization gate</span>
+        <span class="kw">if</span> floor &gt; seed.metadata.ambiguity_score:
+            seed = seed.model_copy(update={<span class="str">"metadata"</span>: ...{<span class="str">"ambiguity_score"</span>: floor}})
+
+    <span class="com"># REVIEW ⇄ REPAIR loop until A-grade or budget</span>
+    <span class="kw">if</span> state.phase == AutoPhase.REVIEW:
+        seed, review, repairs = <span class="kw">await</span> asyncio.wait_for(
+            asyncio.to_thread(repairer.converge, seed, ledger=ledger, cancel_event=cancel_event),
+            timeout=bounded_repair_timeout,
+        )
+        <span class="kw">if not</span> _grade_meets_required(review.grade_result.grade.value, state.required_grade):
+            state.mark_blocked(<span class="str">f"Seed grade ... did not meet required grade ..."</span>, ...)
+
+    <span class="com"># RUN → optional RALPH_HANDOFF chain</span>
+    <span class="kw">if</span> state.phase == AutoPhase.RUN:
+        <span class="kw">if</span> <span class="kw">self</span>.complete_product <span class="kw">and</span> <span class="kw">self</span>.ralph_starter <span class="kw">is not</span> <span class="ty">None</span>:
+            <span class="kw">return await</span> <span class="kw">self</span>._handoff_to_ralph(state, ledger, seed, review, run_subagent=<span class="ty">None</span>)
+        state.transition(AutoPhase.COMPLETE, <span class="str">"execution started; using persisted run handle"</span>)</pre>
+<div class="callout"><strong>The trick:</strong> every phase is a guarded transition, not a callback. The pipeline can be killed mid-phase, restarted, and pick up where it left off — because the only durable thing is <code>state.phase</code>, not "where we are in some Python coroutine stack."</div>
+
+<h3>③ The deterministic ambiguity floor — sealing self-rationalization</h3>
+<p class="annotation">When the LLM generates a Seed, it self-rates its own ambiguity. <code>deterministic_floor()</code> measures the same thing objectively from the ledger (open gaps, conflicting entries, assumption-only sections) and forces the score to <em>at least</em> that. The model can rate itself worse but not better.</p>
+<pre><span class="file">src/ouroboros/auto/pipeline.py:394</span><span class="com"># Apply deterministic floor: the LLM-derived ambiguity_score</span>
+<span class="com"># cannot fall below what code can objectively measure from the</span>
+<span class="com"># ledger (open gaps, conflicting entries, assumption-only</span>
+<span class="com"># sections). Seals self-rationalization at the A-grade gate.</span>
+floor = deterministic_floor(ledger)
+<span class="kw">if</span> floor &gt; seed.metadata.ambiguity_score:
+    seed = seed.model_copy(
+        update={<span class="str">"metadata"</span>: seed.metadata.model_copy(
+            update={<span class="str">"ambiguity_score"</span>: floor}
+        )},
+    )</pre>
+<div class="callout danger"><strong>Why this exists:</strong> the natural attack on a "we're done when grade ≥ A" pipeline is for the model to under-report its own ambiguity. The deterministic floor takes the easy lever away — code computes a minimum bound that the model literally cannot lie below. It's the structural equivalent of Codex's "<code>update_goal</code> can only set status=complete" trick: <em>remove the dial the model would abuse</em>.</div>
+
+<h3>④ Durable session intent — the operator's choice survives crashes</h3>
+<p class="annotation">If you start with <code>--complete-product</code> and the process crashes after RUN, the resumed pipeline still chains to RALPH. Lowering is intentionally one-way — explicit <code>True</code> raises the bound, absence keeps the persisted truth.</p>
+<pre><span class="file">src/ouroboros/auto/pipeline.py:196</span><span class="com"># Q00/ouroboros#773 (review-3): ``complete_product`` is durable session</span>
+<span class="com"># intent, not a per-invocation flag. On a fresh session the constructor</span>
+<span class="com"># writes the operator's choice into the state; on resume we honor the</span>
+<span class="com"># persisted value even when the caller forgot to re-pass the flag, so</span>
+<span class="com"># a session originally started with ``--complete-product`` keeps</span>
+<span class="com"># chaining RUN → RALPH_HANDOFF after restart. Lowering is intentional:</span>
+<span class="com"># explicit ``complete_product=True`` raises the bound; absence keeps</span>
+<span class="com"># the persisted truth.</span>
+<span class="kw">if</span> <span class="kw">self</span>.complete_product <span class="kw">and not</span> state.complete_product:
+    state.complete_product = <span class="ty">True</span>
+<span class="kw">elif</span> state.complete_product <span class="kw">and not</span> <span class="kw">self</span>.complete_product:
+    <span class="kw">self</span>.complete_product = <span class="ty">True</span></pre>
+<div class="callout"><strong>The principle:</strong> intents that affect <em>safety scope</em> (am I allowed to chain to a longer-running loop?) are sticky and one-way. You can opt up but not silently opt down on resume. Same idea as a permission cache that only grows.</div>
+
+<h2>3. <code>ooo auto</code> vs Codex <code>/goal</code></h2>
+
+<table>
+<thead><tr><th></th><th><code>/goal</code> (Codex)</th><th><code>ooo auto</code> (Ouroboros)</th></tr></thead>
+<tbody>
+<tr><td><strong>Shape</strong></td><td>Single autonomous loop</td><td>7-phase typed state machine</td></tr>
+<tr><td><strong>Trigger</strong></td><td>"Agent is idle + goal active"</td><td>Phase transition (INTERVIEW → SEED_GENERATION → ...)</td></tr>
+<tr><td><strong>What it does each iteration</strong></td><td>Inject one developer message</td><td>Run one bounded phase to completion</td></tr>
+<tr><td><strong>Stopping condition</strong></td><td>Model calls <code>update_goal(complete)</code></td><td>Grade ≥ A + execution started (+ optional Ralph QA pass)</td></tr>
+<tr><td><strong>Anti-self-rationalization</strong></td><td>Prompt: "completion audit, don't fake it"</td><td>Code: <code>deterministic_floor()</code> raises ambiguity score</td></tr>
+<tr><td><strong>Budget</strong></td><td>Tokens + wall-clock</td><td>Per-phase timeout + 2h pipeline deadline</td></tr>
+<tr><td><strong>Persistence</strong></td><td>Goal row in state DB</td><td>Full pipeline state on disk; <code>recover()</code> + <code>resume</code></td></tr>
+<tr><td><strong>Failure mode</strong></td><td><code>BudgetLimited</code> → "wrap up" injection</td><td><code>BLOCKED</code> with tool-name attribution → resumable</td></tr>
+<tr><td><strong>Asymmetric control</strong></td><td>Model can <code>complete</code>, not pause/resume</td><td><code>--complete-product</code> can opt up, not silently down</td></tr>
+</tbody>
+</table>
+
+<h2>4. Key Learnings</h2>
+
+<div class="grid">
+  <div class="card">
+    <h3>State machines beat "agent loops" for trust</h3>
+    <p>The 10-value <code>AutoPhase</code> enum is the whole reason this is debuggable. You can grep state files for <code>phase=BLOCKED</code> and immediately know what stage failed and why (<code>last_tool_name</code>, <code>last_error</code>). A free-form agent loop has no such resolution.</p>
+  </div>
+  <div class="card">
+    <h3>Two-axis budgeting</h3>
+    <p>Per-phase timeouts (120s for interview rounds, 60s for run handoff) <em>plus</em> a top-level 2h deadline. Each phase computes <code>min(phase_timeout, remaining_deadline)</code> via <code>_deadline_capped_timeout</code>, so no single slow phase can eat the whole budget.</p>
+  </div>
+  <div class="card">
+    <h3>Deterministic floors over prompt warnings</h3>
+    <p>Both <code>/goal</code> and <code>ooo auto</code> fight self-rationalization. <code>/goal</code> uses prose ("don't accept proxy signals"). <code>ooo auto</code> uses code: <code>deterministic_floor(ledger)</code> measures objectively and overrides the LLM's self-grade. The code version is structurally stronger — the model can't argue against it.</p>
+  </div>
+  <div class="card">
+    <h3>BLOCKED is a feature, not a failure</h3>
+    <p><code>state.recover()</code> takes a BLOCKED session, looks at <code>last_tool_name</code>, finds the recoverable phase via <code>_recoverable_phase_for_tool</code>, and continues. Crashes, timeouts, grade misses — all leave a resumable state. <code>FAILED</code> is reserved for genuinely non-recoverable errors.</p>
+  </div>
+  <div class="card">
+    <h3>Sticky safety intent</h3>
+    <p><code>--complete-product</code> only ratchets up. If you opt into the longer Ralph chain on first run, restarts honor it even when the operator forgets to re-pass the flag. The reverse — silent downgrade on resume — would be a contract violation.</p>
+  </div>
+  <div class="card">
+    <h3>Runtime selection ≠ phase delegation</h3>
+    <p>The <code>--runtime</code> flag picks the LLM backend, but it does <em>not</em> hand the whole pipeline to that backend as one big subagent task. INTERVIEW and SEED_GENERATION run in-process; only RUN actually dispatches out. The <a href="https://github.com/jaeyunha"><code>auto-runtime-semantics.md</code> doc</a> exists specifically because users keep expecting otherwise.</p>
+  </div>
+</div>
+
+<h2>5. Files I Read</h2>
+<ul>
+  <li><code>src/ouroboros/auto/state.py</code> — phase enum, timeouts, redaction</li>
+  <li><code>src/ouroboros/auto/pipeline.py</code> — the 1500-line phase machine</li>
+  <li><code>src/ouroboros/cli/commands/auto.py</code> — CLI entry, <code>--complete-product</code> flag</li>
+  <li><code>docs/auto-runtime-semantics.md</code> — the runtime/dispatch dispel page</li>
+  <li><code>README.md</code> (commands table at line 240)</li>
+  <li>Commit <code>aa534cf5</code> — "feat(auto): chain RUN→RALPH automatically with --complete-product"</li>
+</ul>
+
+<p class="annotation" style="margin-top: 32px;">Companion piece: <a href="/codex-goal-explainer/">How Codex's <code>/goal</code> command works</a> — the single-loop sibling.</p>
+
+</div>
+</body>
+</html>
